@@ -94,6 +94,8 @@ pub enum WebsocketFrame {
     /// Server has sent close frame. The websocket will be closed as a result. This frame is not
     /// exposed to the user.
     Close(&'static [u8]),
+    // Unsupported opcode
+    Unknown(u8),
 }
 
 /// Websocket client that owns underlying stream.
