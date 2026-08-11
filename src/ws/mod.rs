@@ -121,6 +121,21 @@ impl<S> Websocket<S> {
         }
     }
 
+    /// Like [`Websocket::new`] but appends the given extra request headers to the
+    /// upgrade request (e.g. a `User-Agent` demanded by an edge WAF).
+    pub fn new_with_headers(stream: S, endpoint: &str, extra_headers: &[(&str, &str)]) -> Websocket<S>
+    where
+        S: ConnectionInfoProvider,
+    {
+        let connection_info = stream.connection_info().clone();
+        let server_name = connection_info.host();
+        Self {
+            stream,
+            closed: false,
+            state: State::handshake_with_headers(server_name, endpoint, default_buffer_pool_ref(), extra_headers),
+        }
+    }
+
     /// Crate a new websocket by wrapping a stream that has already performed handshake. It is the
     /// user's responsibility to make sure the handshake has been completed. Otherwise, can result
     /// in undefined behaviour.
@@ -308,6 +323,15 @@ impl State {
         Self::Handshake(Handshaker::new(server_name, endpoint, &mut pool), pool)
     }
 
+    pub fn handshake_with_headers(
+        server_name: &str,
+        endpoint: &str,
+        mut pool: BufferPoolRef,
+        extra_headers: &[(&str, &str)],
+    ) -> Self {
+        Self::Handshake(Handshaker::new_with_headers(server_name, endpoint, &mut pool, extra_headers), pool)
+    }
+
     pub fn connection(mut pool: BufferPoolRef) -> Self {
         Self::Connection(Decoder::new(&mut pool))
     }
@@ -407,6 +431,12 @@ pub trait IntoWebsocket {
     fn into_websocket(self, endpoint: &str) -> Websocket<Self>
     where
         Self: Sized;
+
+    /// Like [`IntoWebsocket::into_websocket`] but appends extra request headers
+    /// (e.g. a `User-Agent`) to the upgrade request.
+    fn into_websocket_with_headers(self, endpoint: &str, extra_headers: &[(&str, &str)]) -> Websocket<Self>
+    where
+        Self: Sized;
 }
 
 impl<T> IntoWebsocket for T
@@ -418,6 +448,13 @@ where
         Self: Sized,
     {
         Websocket::new(self, endpoint)
+    }
+
+    fn into_websocket_with_headers(self, endpoint: &str, extra_headers: &[(&str, &str)]) -> Websocket<Self>
+    where
+        Self: Sized,
+    {
+        Websocket::new_with_headers(self, endpoint, extra_headers)
     }
 }
 

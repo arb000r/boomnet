@@ -15,11 +15,17 @@ use std::io::{Cursor, Read, Write};
 #[derive(Debug)]
 pub struct Handshaker {
     inbound_buffer: OwnedReadBuffer<1>,
-    outbound_buffer: Cursor<[u8; 256]>,
+    // The handshake request line can be large (e.g. auth carried as query
+    // params) and callers may add extra headers, so 256 bytes is not enough.
+    // Kept a fixed stack array (no heap alloc on connect) with generous headroom.
+    outbound_buffer: Cursor<[u8; 1024]>,
     bytes_sent: usize,
     state: HandshakeState,
     server_name: String,
     endpoint: String,
+    /// Optional extra request headers appended to the upgrade (e.g. a
+    /// `User-Agent` required by an edge WAF). Empty by default.
+    extra_headers: Vec<(String, String)>,
     pending_msg_buffer: VecDeque<(u8, bool, Option<Vec<u8>>)>,
 }
 
@@ -33,13 +39,28 @@ pub enum HandshakeState {
 
 impl Handshaker {
     pub fn new(server_name: &str, endpoint: &str, pool: &mut BufferPoolRef) -> Self {
+        Self::new_with_headers(server_name, endpoint, pool, &[])
+    }
+
+    /// Like [`Handshaker::new`] but appends the given extra request headers to
+    /// the upgrade request (e.g. a `User-Agent`).
+    pub fn new_with_headers(
+        server_name: &str,
+        endpoint: &str,
+        pool: &mut BufferPoolRef,
+        extra_headers: &[(&str, &str)],
+    ) -> Self {
         Self {
             inbound_buffer: pool.acquire(),
-            outbound_buffer: Cursor::new([0; 256]),
+            outbound_buffer: Cursor::new([0; 1024]),
             bytes_sent: 0,
             state: NotStarted,
             server_name: server_name.to_string(),
             endpoint: endpoint.to_string(),
+            extra_headers: extra_headers
+                .iter()
+                .map(|(name, value)| (name.to_string(), value.to_string()))
+                .collect(),
             pending_msg_buffer: VecDeque::with_capacity(256),
         }
     }
@@ -117,6 +138,9 @@ impl Handshaker {
         outbound.write_all(b"Connection: upgrade\r\n")?;
         outbound.write_all(format!("Sec-WebSocket-Key: {}\r\n", generate_nonce()).as_bytes())?;
         outbound.write_all(b"Sec-WebSocket-Version: 13\r\n")?;
+        for (name, value) in &self.extra_headers {
+            outbound.write_all(format!("{name}: {value}\r\n").as_bytes())?;
+        }
         outbound.write_all(b"\r\n")?;
         self.state = PendingRequest;
         Ok(())
