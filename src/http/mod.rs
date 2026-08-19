@@ -558,14 +558,6 @@ impl<C: ConnectionPool<CHUNK_SIZE>, const CHUNK_SIZE: usize> HttpRequest<C, CHUN
         }
         Ok(None)
     }
-
-    /// Immediately terminate and consume this request.
-    ///
-    /// The request's connection is dropped instead of returned to the pool. Use this when the request
-    /// can no longer complete or its connection may not be safe to reuse, such as after a timeout.
-    pub fn invalidate(mut self) {
-        self.conn.take();
-    }
 }
 
 impl<C: ConnectionPool<CHUNK_SIZE>, const CHUNK_SIZE: usize> Drop for HttpRequest<C, CHUNK_SIZE> {
